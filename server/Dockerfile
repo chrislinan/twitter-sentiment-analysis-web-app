@@ -11,10 +11,10 @@ RUN apt-get upgrade -y
 ENV VIRTUAL_ENV=/opt/venv
 RUN python3 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
-RUN pip install psycopg2-binary
+RUN pip3 install psycopg2-binary
 
 # install system dependencies
-RUN pip install --upgrade pip && pip install pip-tools
+RUN pip3 install --upgrade pip && pip install pip-tools
 
 # Location of the source code
 ENV INSTALL_PATH /app     
@@ -23,7 +23,7 @@ WORKDIR $INSTALL_PATH
 
 # Re-install packages
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip3 install -r requirements.txt
 
 #########
 # FINAL #

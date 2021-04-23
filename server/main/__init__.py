@@ -1,13 +1,7 @@
 import os
 from flask import Flask, request, jsonify
 import tweepy
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.preprocessing.text import Tokenizer
-import pickle
-from tensorflow.compat.v1 import get_default_graph
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior() 
+from monkeylearn import MonkeyLearn
 
 # --------------------------------------
 # BASIC APP SETUP
@@ -26,34 +20,39 @@ from flask_cors import CORS
 CORS(app)
 
 # Keras stuff
-global graph
-graph = get_default_graph()
-model = load_model('main/Sentiment_CNN_model.h5')
+# global graph
+# graph = get_default_graph()
+# model = load_model('main/Sentiment_CNN_model.h5')
 MAX_SEQUENCE_LENGTH = 300
 
 # Twitter
 auth = tweepy.OAuthHandler(app.config.get('CONSUMER_KEY'), app.config.get('CONSUMER_SECRET'))
 auth.set_access_token(app.config.get('ACCESS_TOKEN'), app.config.get('ACCESS_TOKEN_SECRET'))
 api = tweepy.API(auth,wait_on_rate_limit=True)
+ml = MonkeyLearn(app.config.get('MONKEY_LEARN_SENTIMENT_TOKEN'))
+model_id = app.config.get('MODEL_ID')
+key_words_model_id = app.config.get('KEY_WORDS_MODEL_ID')
+
 
 # loading tokenizer
-with open('main/tokenizer.pickle', 'rb') as handle:
-    tokenizer = pickle.load(handle)
+# with open('main/tokenizer.pickle', 'rb') as handle:
+#     tokenizer = pickle.load(handle)
 
 def predict(text, include_neutral=True):
-    # Tokenize text
-    x_test = pad_sequences(tokenizer.texts_to_sequences([text]), maxlen=MAX_SEQUENCE_LENGTH)
-    # Predict
-    score = model.predict([x_test])[0]
-    if(score >=0.4 and score<=0.6):
-        label = "Neutral"
-    if(score <=0.4):
-        label = "Negative"
-    if(score >=0.6):
-        label = "Positive"
+    data = []
+    data.append(text)
 
-    return {"label" : label,
-        "score": float(score)} 
+    result = ml.classifiers.classify(model_id, data)
+    label = result.body[0]['classifications'][0]['tag_name']
+    score = result.body[0]['classifications'][0]['confidence']
+    return {"label" : label, "score": float(score)} 
+
+
+def extractKeyWords(data):
+    result = ml.extractors.extract(key_words_model_id, data)
+    keywords = [ extract['parsed_value'] for extract in result.body[0]['extractions'] ]
+    freq = [ extract['count'] for extract in result.body[0]['extractions'] ]
+    return {"keywords": keywords, "freq": freq}
 
 @app.route('/')
 def index():
@@ -63,9 +62,8 @@ def index():
 def getsentiment():
     data = {"success": False}
     # if parameters are found, echo the msg parameter 
-    if (request.args != None):  
-        with graph.as_default():
-            data["predictions"] = predict(request.args.get("text"))
+    if (request.args != None):
+        data["predictions"] = predict(request.args.get("text"))
         data["success"] = True
     return jsonify(data)
 
@@ -74,16 +72,19 @@ def analyzehashtag():
     positive = 0
     neutral = 0
     negative = 0
+    data = []
     for tweet in tweepy.Cursor(api.search,q="#" + request.args.get("text") + " -filter:retweets",rpp=5,lang="en", tweet_mode='extended').items(100):
-        with graph.as_default():
-            prediction = predict(tweet.full_text)
+        prediction = predict(tweet.full_text)
         if(prediction["label"] == "Positive"):
             positive += 1
         if(prediction["label"] == "Neutral"):
             neutral += 1
         if(prediction["label"] == "Negative"):
             negative += 1
-    return jsonify({"positive": positive, "neutral": neutral, "negative": negative});
+            data.append(tweet.full_text)
+    key_words = extractKeyWords(data)
+    print(key_words)
+    return jsonify({"positive": positive, "neutral": neutral, "negative": negative})
 
 @app.route('/gettweets', methods=['GET'])
 def gettweets():
@@ -92,10 +93,10 @@ def gettweets():
         temp = {}
         temp["text"] = tweet.full_text
         temp["username"] = tweet.user.screen_name
-        with graph.as_default():
-            prediction = predict(tweet.full_text)
+        # with graph.as_default():
+        prediction = predict(tweet.full_text)
         temp["label"] = prediction["label"]
         temp["score"] = prediction["score"]
         tweets.append(temp)
-    return jsonify({"results": tweets});
+    return jsonify({"results": tweets})
     
